@@ -225,6 +225,14 @@ func SetApiRouter(router *gin.Engine) {
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
 		}
+		// Billing debug log toggle (admin only)
+		billingDebugRoute := apiRouter.Group("/debug/billing")
+		billingDebugRoute.Use(middleware.AdminAuth())
+		{
+			billingDebugRoute.GET("", controller.GetBillingDebug)
+			billingDebugRoute.POST("", controller.SetBillingDebug)
+		}
+		// Channel management
 		channelRoute := apiRouter.Group("/channel")
 		channelRoute.Use(middleware.AdminAuth())
 		{

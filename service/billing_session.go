@@ -41,6 +41,14 @@ type BillingSession struct {
 func (s *BillingSession) Settle(actualQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":           "settle_start",
+		"actual_quota":    actualQuota,
+		"pre_consumed":    s.preConsumedQuota,
+		"funding_source":  s.funding.Source(),
+		"funding_settled": s.fundingSettled,
+		"token_consumed":  s.tokenConsumed,
+	})
 	if s.settled {
 		return nil
 	}
@@ -51,10 +59,26 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
+		logger.BillingDebugMap(nil, map[string]interface{}{
+			"stage":          "settle_funding",
+			"funding_source": s.funding.Source(),
+			"delta":          delta,
+		})
 		if err := s.funding.Settle(delta); err != nil {
+			logger.BillingDebugMap(nil, map[string]interface{}{
+				"stage":          "settle_funding_error",
+				"funding_source": s.funding.Source(),
+				"delta":          delta,
+				"error":          err.Error(),
+			})
 			return err
 		}
 		s.fundingSettled = true
+		logger.BillingDebugMap(nil, map[string]interface{}{
+			"stage":          "settle_funding_done",
+			"funding_source": s.funding.Source(),
+			"delta":          delta,
+		})
 	}
 	// 2) 调整令牌额度
 	var tokenErr error
@@ -86,6 +110,13 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		return
 	}
 	s.refunded = true
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":          "refund_start",
+		"user_id":        s.relayInfo.UserId,
+		"funding_source": s.funding.Source(),
+		"pre_consumed":   s.preConsumedQuota,
+		"token_consumed": s.tokenConsumed,
+	})
 	s.mu.Unlock()
 
 	logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费（token_quota=%s, funding=%s）",
@@ -226,6 +257,14 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 	// ---- 同步 RelayInfo 兼容字段 ----
 	s.syncRelayInfo()
 
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":           "pre_consume_executed",
+		"user_id":         s.relayInfo.UserId,
+		"effective_quota": effectiveQuota,
+		"funding_source":  s.funding.Source(),
+		"trusted":         s.trusted,
+	})
+
 	return nil
 }
 
@@ -345,6 +384,13 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":              "session_create",
+		"user_id":            relayInfo.UserId,
+		"pre_consumed_quota": preConsumedQuota,
+		"billing_preference": pref,
+		"model":              relayInfo.OriginModelName,
+	})
 
 	// 钱包路径需要先检查用户额度
 	tryWallet := func() (*BillingSession, *types.NewAPIError) {

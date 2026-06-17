@@ -65,6 +65,12 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":         "pre_consume_start",
+		"model":         info.OriginModelName,
+		"prompt_tokens": promptTokens,
+		"max_tokens":    meta.MaxTokens,
+	})
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
@@ -118,6 +124,12 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
 		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		logger.BillingDebugMap(c, map[string]interface{}{
+			"stage":       "ratio_loaded",
+			"use_price":   usePrice,
+			"model_price": modelPrice,
+			"group_ratio": groupRatioInfo.GroupRatio,
+		})
 	}
 
 	// check if free model pre-consume is disabled
@@ -159,12 +171,21 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	if common.DebugEnabled {
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":              "pre_consume_calculated",
+		"pre_consumed_quota": preConsumedQuota,
+		"free_model":         freeModel,
+	})
 	info.PriceData = priceData
 	return priceData, nil
 }
 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage": "per_call_start",
+		"model": info.OriginModelName,
+	})
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
@@ -213,6 +234,14 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		}
 	}
 
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":       "per_call_calculated",
+		"model_price": modelPrice,
+		"use_price":   usePrice,
+		"quota":       quota,
+		"group_ratio": groupRatioInfo.GroupRatio,
+		"free_model":  freeModel,
+	})
 	priceData := types.PriceData{
 		FreeModel:      freeModel,
 		ModelPrice:     modelPrice,
@@ -254,6 +283,13 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		return types.PriceData{}, err
 	}
 
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":                "tiered_expr_start",
+		"model":                info.OriginModelName,
+		"expr":                 exprStr,
+		"prompt_tokens":        promptTokens,
+		"estimated_completion": estimatedCompletionTokens,
+	})
 	rawCost, trace, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{
 		P:   float64(promptTokens),
 		C:   float64(estimatedCompletionTokens),
@@ -264,6 +300,13 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	}
 
 	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":              "tiered_expr_result",
+		"raw_cost":           rawCost,
+		"matched_tier":       trace.MatchedTier,
+		"quota_before_group": rawCost / 1_000_000 * common.QuotaPerUnit,
+		"group_ratio":        groupRatioInfo.GroupRatio,
+	})
 	quotaBeforeGroup := rawCost / 1_000_000 * common.QuotaPerUnit
 	preConsumedQuota := billingexpr.QuotaRound(quotaBeforeGroup * groupRatioInfo.GroupRatio)
 
@@ -290,6 +333,12 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		QuotaPerUnit:              common.QuotaPerUnit,
 		ExprVersion:               billingexpr.ExprVersion(exprStr),
 	}
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":              "tiered_pre_consume_calculated",
+		"pre_consumed_quota": preConsumedQuota,
+		"free_model":         freeModel,
+		"matched_tier":       trace.MatchedTier,
+	})
 	info.TieredBillingSnapshot = snapshot
 	info.BillingRequestInput = &requestInput
 
@@ -301,6 +350,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 
 	logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", info.OriginModelName, preConsumedQuota, quotaBeforeGroup, groupRatioInfo.GroupRatio, trace.MatchedTier)
 
+	logger.BillingDebugMap(c, map[string]interface{}{
+		"stage":              "pre_consume_calculated",
+		"pre_consumed_quota": preConsumedQuota,
+		"free_model":         freeModel,
+	})
 	info.PriceData = priceData
 	return priceData, nil
 }

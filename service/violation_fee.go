@@ -123,10 +123,32 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
+	logger.BillingDebugMap(ctx, map[string]interface{}{
+		"stage":       "violation_fee_start",
+		"user_id":     relayInfo.UserId,
+		"model":       relayInfo.OriginModelName,
+		"base_amount": settings.ViolationDeductionAmount,
+		"group_ratio": groupRatio,
+		"fee_quota":   feeQuota,
+		"error_code":  string(apiErr.GetErrorCode()),
+	})
+
 	if err := PostConsumeQuota(relayInfo, feeQuota, 0, true); err != nil {
+		logger.BillingDebugMap(ctx, map[string]interface{}{
+			"stage":     "violation_fee_error",
+			"user_id":   relayInfo.UserId,
+			"fee_quota": feeQuota,
+			"error":     err.Error(),
+		})
 		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
 		return false
 	}
+
+	logger.BillingDebugMap(ctx, map[string]interface{}{
+		"stage":     "violation_fee_charged",
+		"user_id":   relayInfo.UserId,
+		"fee_quota": feeQuota,
+	})
 
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
 	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
