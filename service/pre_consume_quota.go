@@ -16,6 +16,12 @@ import (
 
 func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 	if relayInfo.FinalPreConsumedQuota != 0 {
+		logger.BillingDebugMap(c, map[string]interface{}{
+			"stage":          "return_pre_consumed",
+			"user_id":        relayInfo.UserId,
+			"pre_consumed":   relayInfo.FinalPreConsumedQuota,
+			"billing_source": relayInfo.BillingSource,
+		})
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费额度 %s", relayInfo.UserId, logger.FormatQuota(relayInfo.FinalPreConsumedQuota)))
 		gopool.Go(func() {
 			relayInfoCopy := *relayInfo

@@ -185,6 +185,14 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) {
+	logger.BillingDebugMapWithCtx(ctx, map[string]interface{}{
+		"stage":        "task_recalculate",
+		"task_id":      task.TaskID,
+		"actual_quota": actualQuota,
+		"pre_consumed": task.Quota,
+		"delta":        actualQuota - task.Quota,
+		"reason":       reason,
+	})
 	if actualQuota <= 0 {
 		return
 	}

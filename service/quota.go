@@ -138,6 +138,18 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 	quota := calculateAudioQuota(quotaInfo)
 
+	logger.BillingDebugMap(ctx, map[string]interface{}{
+		"stage":            "wss_pre_consume_calculated",
+		"model":            modelName,
+		"model_ratio":      modelRatio,
+		"group_ratio":      actualGroupRatio,
+		"quota":            quota,
+		"text_in_tokens":   textInputTokens,
+		"text_out_tokens":  textOutTokens,
+		"audio_in_tokens":  audioInputTokens,
+		"audio_out_tokens": audioOutTokens,
+	})
+
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
 	}
@@ -404,6 +416,14 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 }
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":          "post_consume_quota",
+		"quota":          quota,
+		"pre_consumed":   preConsumedQuota,
+		"billing_source": relayInfo.BillingSource,
+		"user_id":        relayInfo.UserId,
+		"send_email":     sendEmail,
+	})
 
 	// 1) Consume from wallet quota OR subscription item
 	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {

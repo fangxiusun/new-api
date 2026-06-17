@@ -330,6 +330,21 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	logger.BillingDebugMap(ctx, map[string]interface{}{
+		"stage":             "text_quota_calculated",
+		"model":             summary.ModelName,
+		"prompt_tokens":     summary.PromptTokens,
+		"completion_tokens": summary.CompletionTokens,
+		"cache_tokens":      summary.CacheTokens,
+		"image_tokens":      summary.ImageTokens,
+		"audio_tokens":      summary.AudioTokens,
+		"model_ratio":       summary.ModelRatio,
+		"completion_ratio":  summary.CompletionRatio,
+		"cache_ratio":       summary.CacheRatio,
+		"group_ratio":       summary.GroupRatio,
+		"model_price":       summary.ModelPrice,
+		"quota":             summary.Quota,
+	})
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
@@ -343,6 +358,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			logger.BillingDebugMap(ctx, map[string]interface{}{
+				"stage":        "tiered_settle_applied",
+				"tiered_quota": tieredQuota,
+				"final_quota":  summary.Quota,
+				"model":        summary.ModelName,
+			})
 		}
 	}
 

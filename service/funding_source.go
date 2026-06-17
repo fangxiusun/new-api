@@ -3,6 +3,7 @@ package service
 import (
 	"time"
 
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -34,6 +35,11 @@ type WalletFunding struct {
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
 
 func (w *WalletFunding) PreConsume(amount int) error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":   "wallet_pre_consume",
+		"user_id": w.userId,
+		"amount":  amount,
+	})
 	if amount <= 0 {
 		return nil
 	}
@@ -45,6 +51,11 @@ func (w *WalletFunding) PreConsume(amount int) error {
 }
 
 func (w *WalletFunding) Settle(delta int) error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":   "wallet_settle",
+		"user_id": w.userId,
+		"delta":   delta,
+	})
 	if delta == 0 {
 		return nil
 	}
@@ -55,6 +66,11 @@ func (w *WalletFunding) Settle(delta int) error {
 }
 
 func (w *WalletFunding) Refund() error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":    "wallet_refund",
+		"user_id":  w.userId,
+		"consumed": w.consumed,
+	})
 	if w.consumed <= 0 {
 		return nil
 	}
@@ -84,6 +100,12 @@ type SubscriptionFunding struct {
 func (s *SubscriptionFunding) Source() string { return BillingSourceSubscription }
 
 func (s *SubscriptionFunding) PreConsume(_ int) error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":      "subscription_pre_consume",
+		"user_id":    s.userId,
+		"request_id": s.requestId,
+		"amount":     s.amount,
+	})
 	// amount 参数被忽略，使用内部 s.amount（已在构造时根据 preConsumedQuota 计算）
 	res, err := model.PreConsumeUserSubscription(s.requestId, s.userId, s.modelName, 0, s.amount)
 	if err != nil {
@@ -102,6 +124,11 @@ func (s *SubscriptionFunding) PreConsume(_ int) error {
 }
 
 func (s *SubscriptionFunding) Settle(delta int) error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":           "subscription_settle",
+		"subscription_id": s.subscriptionId,
+		"delta":           delta,
+	})
 	if delta == 0 {
 		return nil
 	}
@@ -109,6 +136,11 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 }
 
 func (s *SubscriptionFunding) Refund() error {
+	logger.BillingDebugMap(nil, map[string]interface{}{
+		"stage":        "subscription_refund",
+		"request_id":   s.requestId,
+		"pre_consumed": s.preConsumed,
+	})
 	if s.preConsumed <= 0 {
 		return nil
 	}
