@@ -1,4 +1,4 @@
-﻿# Ali 渠道请求/应答字段映射详细参考
+# Ali 渠道请求/应答字段映射详细参考
 
 > 生成时间: 2026-06-17
 > 本文档精确列出每条链路中「客户端发送的字段 → 系统内部处理 → 发送给上游 Ali 服务的字段 → 上游返回的字段 → 系统返回给客户端的字段」的完整映射关系，并标注对应的代码文件和行号。
@@ -713,7 +713,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(...) *dto.TaskError {
 
 **URL**：`relay/channel/task/ali/adaptor.go:125-140`
 ```
-POST {baseURL}/api/v1/services/aigc/video-generation/generation
+POST {baseURL}/api/v1/services/aigc/video-generation/video-synthesis
 ```
 
 所有视频模型使用**同一端点**（L134-139）。
