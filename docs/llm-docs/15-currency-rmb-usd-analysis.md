@@ -1,4 +1,4 @@
-﻿# 人民币与美元逻辑关系 — 深度分析文档
+# 人民币与美元逻辑关系 — 深度分析文档
 
 > 本文档深入分析系统中钱包、支付、充值、扣费涉及的所有货币逻辑，
 > 理清人民币（CNY）和美元（USD）在系统内部的完整关系链。
@@ -37,6 +37,9 @@ const (
 - 展示货币**仅影响前端显示**，不影响任何后端计算和存储
 - 转换公式：`展示金额 = Quota ÷ QuotaPerUnit × usdExchangeRate`
 - 后端日志（`logger.FormatQuota`）也会跟随此配置切换显示
+- 支持的展示类型：`USD`、`CNY`、`TOKENS`、`CUSTOM`
+- `CUSTOM` 类型允许管理员自定义货币符号（`custom_currency_symbol`）和汇率（`custom_currency_exchange_rate`），转换公式与 CNY 相同
+- `TOKENS` 类型直接显示 Quota 原始值，不进行货币换算
 
 ### 1.3 支付货币：用户实际支付金额
 
@@ -54,6 +57,8 @@ const (
 | `Price` | `operation_setting/payment_setting_old.go` | 7.3 | 充值 1 USD 信用额需支付的金额（易支付） |
 | `StripeUnitPrice` | `setting/payment_stripe.go` | 8.0 | 充值 1 USD 信用额需支付的美元（Stripe） |
 | `USD2RMB` | `setting/ratio_setting/model_ratio.go` | 7.3 | 模型默认比率中 RMB→USD 的换算常量（代码硬编码） |
+| `topupGroupRatio` | `common/quota.go` | 1.0 | 充值分组比率，影响实际充值金额（默认 1） |
+| `AmountDiscount` | `operation_setting/payment_setting.go` | {} | 充值金额对应的折扣，如 `{100: 0.9}` 表示 100 充值享 9 折 |
 
 ### 2.1 关键区分：`Price` vs `USDExchangeRate`
 
@@ -266,7 +271,7 @@ const (
 
 **这些值的单位始终是 USD**：
 - `model_price`: USD/次（固定价格模式）
-- `model_ratio`: USD/1K tokens 的比例系数
+- `model_ratio`: 无量纲比值，1 = $0.002/1K tokens（即 500 ratio = $1/1K tokens）。该值不是 USD 本身，而是一个比例系数，实际扣费公式为 `quota = token数 × modelRatio × QuotaPerUnit / 1000`
 
 ### 5.4 能否直接配置人民币金额？
 
@@ -391,11 +396,13 @@ Quota 值 (数据库)
 | 渠道 | amount 单位 | 充值公式 | 实际到账 |
 |------|------------|---------|---------|
 | 易支付 | 展示货币(USD) | amount × Price | amount × QuotaPerUnit |
-| Stripe | 展示货币(USD) | amount × StripeUnitPrice | Money × QuotaPerUnit |
+| Stripe | 展示货币(USD) | amount × StripeUnitPrice × topupGroupRatio × discount | amount × QuotaPerUnit |
 | Waffo | 展示货币(USD) | — | amount × QuotaPerUnit |
 | Waffo Pancake | 展示货币(USD) | amount × Price × Ratio | amount × QuotaPerUnit |
 | Creem | 直接额度 | 产品价格 | Amount(直接是 Quota) |
 | 兑换码 | — | — | 码面值(Quota) |
+
+> **TOKENS 模式说明**：当 `quota_display_type=TOKENS` 时，前端传给后端的 `amount` 单位是 token 数（如 500000），后端 `getPayMoney()` 会先除以 `QuotaPerUnit` 转换为 USD 再计算支付金额。
 
 ---
 
@@ -406,3 +413,4 @@ Quota 值 (数据库)
 | 前端人民币展示 | ✅ 只需配置 `quota_display_type="CNY"` 即可，无需改代码 |
 | 充值所见即所得 | ✅ 当 `Price = USDExchangeRate` 时（默认均为 7.3），所见即所得 |
 | 直接配置人民币价格 | ❌ 不能。模型价格始终以 USD 为单位存储和计算，需手动 ÷ 7.3 换算 |
+| CUSTOM 展示类型 | ✅ 只需配置 `quota_display_type="CUSTOM"` 并设置 `custom_currency_symbol` 和 `custom_currency_exchange_rate` 即可 |
