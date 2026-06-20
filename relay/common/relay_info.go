@@ -681,6 +681,13 @@ type TaskRelayInfo struct {
 	LockedChannel any
 }
 
+// Media represents a multimodal media entry (image, video, audio) attached to a task request.
+type Media struct {
+	Type string `json:"type"`           // image / video / audio
+	URL  string `json:"url"`            // media URL or data URI
+	Mime string `json:"mime,omitempty"` // optional MIME type, e.g. "image/png"
+}
+
 type TaskSubmitReq struct {
 	Prompt         string                 `json:"prompt"`
 	Model          string                 `json:"model,omitempty"`
@@ -691,7 +698,39 @@ type TaskSubmitReq struct {
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
+	Media          []Media                `json:"assets,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// GetMediaURLs returns all media URLs of the given type (e.g. "image", "video", "audio").
+func (t *TaskSubmitReq) GetMediaURLs(mediaType string) []string {
+	var urls []string
+	for _, a := range t.Media {
+		if strings.EqualFold(a.Type, mediaType) && a.URL != "" {
+			urls = append(urls, a.URL)
+		}
+	}
+	return urls
+}
+
+// HasMediaType returns true if at least one media entry of the given type exists.
+func (t *TaskSubmitReq) HasMediaType(mediaType string) bool {
+	for _, a := range t.Media {
+		if strings.EqualFold(a.Type, mediaType) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasVideoMedia returns true if media contain at least one video entry.
+func (t *TaskSubmitReq) HasVideoMedia() bool {
+	return t.HasMediaType("video")
+}
+
+// HasAudioMedia returns true if media contain at least one audio entry.
+func (t *TaskSubmitReq) HasAudioMedia() bool {
+	return t.HasMediaType("audio")
 }
 
 func (t *TaskSubmitReq) GetPrompt() string {
@@ -699,7 +738,7 @@ func (t *TaskSubmitReq) GetPrompt() string {
 }
 
 func (t *TaskSubmitReq) HasImage() bool {
-	return len(t.Images) > 0
+	return len(t.Images) > 0 || t.HasMediaType("image")
 }
 
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
