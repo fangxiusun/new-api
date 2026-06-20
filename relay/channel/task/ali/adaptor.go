@@ -378,7 +378,6 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 // ============================
 
 func boolPtr(b bool) *bool { return &b }
-func intPtr(i int) *int    { return &i }
 
 // isNewFormatModel 判断是否为新格式模型 (wan2.7+ 或 happyhorse)
 func isNewFormatModel(model string) bool {
@@ -487,11 +486,11 @@ func buildOldFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliOld
 				aliReq.Input.ReferenceURLs = urls
 			}
 		}
-		if v, ok := tmpInput["first_clip_url"].(string); ok {
-			aliReq.Input.FirstClipURL = v
+		if v, ok := tmpInput["first_frame_url"].(string); ok {
+			aliReq.Input.FirstFrameURL = v
 		}
-		if v, ok := tmpInput["last_clip_url"].(string); ok {
-			aliReq.Input.LastClipURL = v
+		if v, ok := tmpInput["last_frame_url"].(string); ok {
+			aliReq.Input.LastFrameURL = v
 		}
 		if v, ok := tmpInput["function"].(string); ok {
 			aliReq.Input.Function = v
@@ -516,10 +515,10 @@ func buildOldFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliOld
 			if !strings.HasSuffix(v, "P") {
 				v = v + "P"
 			}
-			aliReq.Parameters.Resolution = v
+			aliReq.Parameters.Resolution = strings.ToUpper(v)
 		}
 		if v, ok := req.Metadata["size"].(string); ok {
-			if strings.Contains(req.Size, "*") {
+			if strings.Contains(v, "*") {
 				aliReq.Parameters.Size = v
 			}
 		}
@@ -562,18 +561,12 @@ func buildOldFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliOld
 			aliReq.Input.ImgURL = m.URL
 		case "audio_url":
 			aliReq.Input.AudioURL = m.URL
-		case "negative_prompt":
-			aliReq.Input.NegativePrompt = m.URL
-		case "template":
-			aliReq.Input.Template = m.URL
 		case "reference_urls":
 			aliReq.Input.ReferenceURLs = append(aliReq.Input.ReferenceURLs, m.URL)
 		case "first_frame_url":
 			aliReq.Input.FirstFrameURL = m.URL
 		case "last_frame_url":
 			aliReq.Input.LastFrameURL = m.URL
-		case "function":
-			aliReq.Input.Function = m.URL
 		case "ref_images_url":
 			aliReq.Input.RefImagesURL = append(aliReq.Input.RefImagesURL, m.URL)
 		case "video_url":
@@ -595,7 +588,7 @@ func buildOldFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliOld
 		return nil, fmt.Errorf("Parameter Key [ images ] is unused, use media please")
 	}
 	if req.Size != "" {
-		return nil, fmt.Errorf("Parameter Key [ size ] is unused, use media please")
+		return nil, fmt.Errorf("Parameter Key [ size ] is unused, use metadata please")
 	}
 	if req.Duration > 0 {
 		return nil, fmt.Errorf("Parameter Key [ duration ] is unused, use metadata please")
@@ -672,7 +665,7 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 			if !strings.HasSuffix(v, "P") {
 				v = v + "P"
 			}
-			aliReq.Parameters.Resolution = v
+			aliReq.Parameters.Resolution = strings.ToUpper(v)
 		}
 		if v, ok := req.Metadata["duration"]; ok {
 			if n, ok := toInt(v); ok {
@@ -695,7 +688,7 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 			}
 		}
 		if v, ok := req.Metadata["ratio"].(string); ok {
-			if strings.Contains(req.Size, ":") {
+			if strings.Contains(v, ":") {
 				aliReq.Parameters.Ratio = v
 			}
 		}
@@ -721,7 +714,7 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 		return nil, fmt.Errorf("Parameter Key [ images ] is unused, use media please")
 	}
 	if req.Size != "" {
-		return nil, fmt.Errorf("Parameter Key [ size ] is unused, use media please")
+		return nil, fmt.Errorf("Parameter Key [ size ] is unused, use metadata please")
 	}
 	if req.Duration > 0 {
 		return nil, fmt.Errorf("Parameter Key [ duration ] is unused, use metadata please")
@@ -737,74 +730,11 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 		aliReq.Parameters.Resolution = "1080P"
 	}
 
+	if aliReq.Parameters.Duration <= 0 {
+		aliReq.Parameters.Duration = 5
+	}
+
 	return aliReq, nil
-}
-
-// applyInputMetadata 将 Metadata["input"] 合并到请求的 input 字段
-func applyInputMetadata(reqBody any, metadata map[string]interface{}) {
-	if metadata == nil {
-		return
-	}
-	inputMeta, ok := metadata["input"].(map[string]interface{})
-	if !ok || len(inputMeta) == 0 {
-		return
-	}
-
-	switch r := reqBody.(type) {
-	case *AliOldVideoRequest:
-		mergeMapToStruct(&r.Input, inputMeta)
-	case *AliNewVideoRequest:
-		mergeMapToStruct(&r.Input, inputMeta)
-	}
-}
-
-// applyParameterMetadata 将 metadata 中除 "input" 和 "model" 外的键合并到 parameters
-func applyParameterMetadata(reqBody any, metadata map[string]interface{}) {
-	if metadata == nil {
-		return
-	}
-
-	paramMeta := make(map[string]interface{})
-	for k, v := range metadata {
-		if k == "input" || k == "model" {
-			continue
-		}
-		paramMeta[k] = v
-	}
-	if len(paramMeta) == 0 {
-		return
-	}
-
-	switch r := reqBody.(type) {
-	case *AliOldVideoRequest:
-		if r.Parameters != nil {
-			mergeMapToStruct(r.Parameters, paramMeta)
-		}
-	case *AliNewVideoRequest:
-		if r.Parameters != nil {
-			mergeMapToStruct(r.Parameters, paramMeta)
-		}
-	}
-}
-
-// mergeMapToStruct 通过 JSON 往返将 map 合并到 struct
-func mergeMapToStruct(target any, data map[string]interface{}) {
-	targetBytes, err := common.Marshal(target)
-	if err != nil {
-		return
-	}
-	var targetMap map[string]interface{}
-	if err := common.Unmarshal(targetBytes, &targetMap); err != nil {
-		return
-	}
-	for k, v := range data {
-		targetMap[k] = v
-	}
-	mergedBytes, err := common.Marshal(targetMap)
-	if err != nil {
-		return
-	}
-	common.Unmarshal(mergedBytes, target)
 }
 
 // defaultResolution 返回模型的默认分辨率
