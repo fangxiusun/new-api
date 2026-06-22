@@ -117,9 +117,12 @@ type AliVideoOutput struct {
 }
 
 type AliUsage struct {
-	Duration   dto.IntValue `json:"duration,omitempty"`
-	VideoCount dto.IntValue `json:"video_count,omitempty"`
-	SR         dto.IntValue `json:"SR,omitempty"`
+	InputVideoDuration  dto.IntValue    `json:"input_video_duration,omitempty"`
+	OutputVideoDuration dto.IntValue    `json:"output_video_duration,omitempty"`
+	Duration            dto.IntValue    `json:"duration,omitempty"`
+	SR                  dto.IntValue    `json:"SR,omitempty"`
+	Ratio               dto.StringValue `json:"ratio,omitempty"`
+	VideoCount          dto.IntValue    `json:"video_count,omitempty"`
 }
 
 // ============================
@@ -232,6 +235,20 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	for k, v := range ratios {
 		otherRatios[k] = v
 	}
+
+	if common.IsBillingDebugEnabled() {
+		logMap := make(map[string]any, len(otherRatios)+5)
+		for k, v := range otherRatios {
+			logMap[k] = v
+		}
+		logMap["function"] = "EstimateBilling"
+		logMap["size_v"] = size
+		logMap["resolution_v"] = resolution
+		logMap["audio_v"] = *audio
+		logMap["duration_v"] = duration
+		logger.BillingDebugMap(c, logMap)
+	}
+
 	return otherRatios
 }
 
@@ -337,6 +354,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		}
 	default:
 		taskResult.Status = model.TaskStatusQueued
+	}
+
+	// 提取 Usage 用于任务完成后的计费重算
+	if aliResp.Usage != nil && aliResp.Usage.Duration > 0 {
+		taskResult.CompletionTokens = int(aliResp.Usage.Duration)
 	}
 
 	return &taskResult, nil
@@ -871,6 +893,127 @@ func findModelRatios(model string, aliRatios map[string]map[string]float64) map[
 		return len(entries[i].prefix) > len(entries[j].prefix)
 	})
 	return entries[0].ratios
+}
+
+// AdjustBillingOnComplete 任务完成时基于 AliUsage 实际值重新计算扣费。
+// 依赖：Duration（实际时长）、VideoCount（视频数量）、SR（超分辨率）、继承的 audio 设置。
+// 通过 actualOtherProduct / estimatedOtherProduct 缩放预扣额度。
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
+	if taskResult.Status != model.TaskStatusSuccess {
+		return 0
+	}
+
+	var aliResp AliVideoResponse
+	if err := common.Unmarshal(task.Data, &aliResp); err != nil {
+		return 0
+	}
+	if aliResp.Usage == nil || aliResp.Usage.Duration <= 0 {
+		return 0
+	}
+
+	bc := task.PrivateData.BillingContext
+	if bc == nil || len(bc.OtherRatios) == 0 {
+		return 0
+	}
+
+	// 1. 提取实际值
+	actualDuration := float64(aliResp.Usage.Duration)
+	videoCount := float64(aliResp.Usage.VideoCount)
+	if videoCount <= 0 {
+		videoCount = 1
+	}
+	sr := int(aliResp.Usage.SR)
+
+	// 2. 获取预估秒数
+	estimatedSeconds, ok := bc.OtherRatios["seconds"]
+	if !ok || estimatedSeconds <= 0 {
+		return 0
+	}
+
+	// 3. 确定模型名
+	modelName := bc.OriginModelName
+	if modelName == "" {
+		modelName = task.Properties.OriginModelName
+	}
+	if modelName == "" {
+		modelName = task.Properties.UpstreamModelName
+	}
+
+	// 4. 从预估 OtherRatios 推断原始分辨率和 audio 状态
+	var resolution string
+	for key := range bc.OtherRatios {
+		if strings.HasPrefix(key, "resolution-") {
+			resolution = strings.TrimPrefix(key, "resolution-")
+			break
+		}
+	}
+
+	var audio *bool
+	if _, hasAudio := bc.OtherRatios["audio"]; hasAudio {
+		audioVal := true
+		audio = &audioVal
+	}
+
+	// 5. SR 分辨率
+	if sr > 0 {
+		resolution = fmt.Sprintf("%dP", sr)
+	}
+
+	// 6. 用实际分辨率重新计算 ratio
+	newRatios, err := ProcessAliOtherRatios(modelName, "", resolution, audio)
+	if err != nil {
+		// 降级：仅按时长和视频数量缩放
+		actualQuota := int(float64(task.Quota) * actualDuration * videoCount / estimatedSeconds)
+		if actualQuota < 0 {
+			return 0
+		}
+		return actualQuota
+	}
+
+	// 7. 计算实际 other 乘积：时长 x 视频数 x 分辨率ratio x [audio ratio]
+	actualMultiplier := actualDuration * videoCount
+	for _, v := range newRatios {
+		if v > 0 {
+			actualMultiplier *= v
+		}
+	}
+
+	// 8. 计算预估 other 乘积（来自 BillingContext）
+	estimatedMultiplier := 1.0
+	for _, v := range bc.OtherRatios {
+		if v > 0 {
+			estimatedMultiplier *= v
+		}
+	}
+	if estimatedMultiplier <= 0 {
+		return 0
+	}
+
+	// 9. 缩放得到实际应扣额度
+	actualQuota := int(float64(task.Quota) * actualMultiplier / estimatedMultiplier)
+	if actualQuota < 0 {
+		return 0
+	}
+
+	if common.IsBillingDebugEnabled() {
+		logMap := make(map[string]any, len(newRatios)+5)
+		for k, v := range newRatios {
+			logMap[k] = v
+		}
+		logMap["function"] = "AdjustBillingOnComplete"
+		logMap["resolution_v"] = resolution
+		logMap["audio_v"] = *audio
+		logMap["actualDuration_v"] = actualDuration
+		logMap["task_quota"] = task.Quota
+		logMap["videoCount"] = videoCount
+		logMap["estimatedSeconds"] = estimatedSeconds
+		logMap["actualMultiplier"] = actualMultiplier
+		logMap["estimatedMultiplier"] = estimatedMultiplier
+		logMap["actualQuota"] = actualQuota
+		logger.BillingDebugMap(nil, logMap)
+	}
+
+	return actualQuota
 }
 
 func convertAliStatus(aliStatus string) string {
