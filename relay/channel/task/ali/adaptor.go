@@ -1,4 +1,4 @@
-package ali
+﻿package ali
 
 import (
 	"bytes"
@@ -283,6 +283,16 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		return
 	}
 
+	// Ali 透传模式：直接输出原生 Ali 响应格式
+	upstreamTaskID := aliResp.Output.TaskID // 备份上游ID，避免被下面的错误污染
+	if isAliPassthrough, exists := c.Get("ali_passthrough"); exists && isAliPassthrough.(bool) {
+		// 设置公共 task ID 到响应中（替换上游 task ID）
+		aliResp.Output.TaskID = info.PublicTaskID
+		c.JSON(http.StatusOK, aliResp)
+		return upstreamTaskID, responseBody, nil
+	}
+
+	// 标准模式：输出 OpenAI 兼容格式
 	openAIResp := dto.NewOpenAIVideo()
 	openAIResp.ID = info.PublicTaskID
 	openAIResp.TaskID = info.PublicTaskID
@@ -295,7 +305,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 
 	c.JSON(http.StatusOK, openAIResp)
 
-	return aliResp.Output.TaskID, responseBody, nil
+	return upstreamTaskID, responseBody, nil
 }
 
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {

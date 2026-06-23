@@ -1,4 +1,4 @@
-package router
+﻿package router
 
 import (
 	"github.com/QuantumNous/new-api/controller"
@@ -48,5 +48,19 @@ func SetVideoRouter(router *gin.Engine) {
 	{
 		// Maps to: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31 and /?Action=CVSync2AsyncGetResult&Version=2022-08-31
 		jimengOfficialGroup.POST("/", controller.RelayTask)
+	}
+
+	// Ali (阿里云) official API routes - direct mapping to official API format
+	// 与 Kling/Jimeng 的区别：响应以 Ali 原生格式输出
+	aliV1Router := router.Group("/ali/v1")
+	aliV1Router.Use(middleware.RouteTag("relay"))
+	aliV1Router.Use(middleware.AliRequestConvert(), middleware.TokenAuth(), middleware.Distribute())
+	{
+		// 视频生成任务提交
+		aliV1Router.POST("/services/aigc/video-generation/video-synthesis", controller.RelayTask)
+		// 图生视频任务提交 (kf2v 系列)
+		aliV1Router.POST("/services/aigc/image2video/video-synthesis", controller.RelayTask)
+		// 任务状态查询
+		aliV1Router.GET("/tasks/:task_id", controller.RelayTaskFetch)
 	}
 }

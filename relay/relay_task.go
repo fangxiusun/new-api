@@ -1,4 +1,4 @@
-package relay
+﻿package relay
 
 import (
 	"bytes"
@@ -377,6 +377,28 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+
+	// Ali 透传模式：返回原生 Ali 格式响应
+	if isAliPassthrough, exists := c.Get("ali_passthrough"); exists && isAliPassthrough.(bool) {
+		if originTask.Data == nil || len(originTask.Data) == 0 {
+			taskResp = service.TaskErrorWrapperLocal(errors.New("ali origin response data is empty"), "ali_origin_response_empty", http.StatusInternalServerError)
+			return
+		}
+		var rawData map[string]interface{}
+		if err := common.Unmarshal(originTask.Data, &rawData); err != nil {
+			taskResp = service.TaskErrorWrapper(err, "unmarshal_ali_response_failed", http.StatusInternalServerError)
+			return
+		}
+		// 替换 output.task_id 为公共 task ID
+		if output, ok := rawData["output"].(map[string]interface{}); ok {
+			output["task_id"] = originTask.TaskID
+		}
+		respBody, err = common.Marshal(rawData)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "marshal_ali_response_failed", http.StatusInternalServerError)
+		}
+		return
+	}
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
