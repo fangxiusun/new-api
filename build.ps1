@@ -62,6 +62,16 @@ Write-OK "Bun: v$bunVersion"
 
 # ── 编译前端 ──
 if (-not $SkipFrontend) {
+    Write-Step "删除上一次构建"
+    if (Test-Path "web\default\dist") {
+        Remove-Item "web\default\dist" -Recurse -Force
+        Write-OK "已删除 web/default/dist"
+    }
+    if (Test-Path "web\classic\dist") {
+        Remove-Item "web\classic\dist" -Recurse -Force
+        Write-OK "已删除 web/classic/dist"
+    }
+
     Write-Step "安装前端依赖 (bun install)"
     Push-Location "web"
     try {
@@ -134,43 +144,70 @@ if ($FrontendOnly) {
 Write-Step "编译 Go 后端 (CGO_ENABLED=0)"
 
 $env:CGO_ENABLED = "0"
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
 $env:GOEXPERIMENT = "greenteagc"
 
 $ldflags = "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$Version'"
 
-$outputName = "new-api.exe"
+$windowsOutputName = "new-api.exe"
+$linuxOutputName = "new-api"
+
 if ($OutputDir -ne ".") {
     # 确保输出目录存在
     if (-not (Test-Path $OutputDir)) {
         New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
     }
-    $outputPath = Join-Path $OutputDir $outputName
+    $windowsOutputPath = Join-Path $OutputDir $windowsOutputName
+    $linuxOutputPath = Join-Path $OutputDir $linuxOutputName
 } else {
-    $outputPath = $outputName
+    $windowsOutputPath = $windowsOutputName
+    $linuxOutputPath = $linuxOutputName
+}
+
+if (Test-Path $windowsOutputPath) {
+    Remove-Item $windowsOutputPath -Force
+    Write-OK "已删除 $windowsOutputPath"
+}
+
+if (Test-Path $linuxOutputPath) {
+    Remove-Item $linuxOutputPath -Force
+    Write-OK "已删除 $linuxOutputPath"
 }
 
 try {
-    & go build -ldflags $ldflags -o $outputPath
+    # Windows amd64
+    Write-Step "编译 Windows amd64"
+    $env:GOOS = "windows"
+    $env:GOARCH = "amd64"
+    & go build -ldflags $ldflags -o $windowsOutputPath
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Go 编译失败"
+        Write-Fail "Windows 版本 Go 编译失败"
         exit 1
     }
-    Write-OK "Go 编译完成 -> $outputPath"
+    Write-OK "Windows 版本 Go 编译完成 -> $windowsOutputPath"
+	
+    # Linux amd64
+    Write-Step "编译 Linux amd64"
+    $env:GOOS = "linux"
+    $env:GOARCH = "amd64"
+    & go build -ldflags $ldflags -o $linuxOutputPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Linux 版本 Go 编译失败"
+        exit 1
+    }
+    Write-OK "Linux 编译完成 -> $linuxOutputPath"
 } finally {
     Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
     Remove-Item Env:GOEXPERIMENT -ErrorAction SilentlyContinue
 }
 
 # ── 完成 ──
-$size = [math]::Round((Get-Item $outputPath).Length / 1MB, 1)
+$size = [math]::Round((Get-Item $windowsOutputPath).Length / 1MB, 1)
 Write-Host "`n========================================" -ForegroundColor Green
 Write-Host " 编译成功!" -ForegroundColor Green
-Write-Host " 输出文件: $outputPath" -ForegroundColor Green
+Write-Host " 输出文件: $windowsOutputPath" -ForegroundColor Green
 Write-Host " 文件大小: ${size} MB" -ForegroundColor Green
 Write-Host " 版本号:   $Version" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "`n运行: .\$outputName" -ForegroundColor Yellow
+Write-Host "`n运行: .\$windowsOutputName" -ForegroundColor Yellow
 Write-Host "默认监听: http://localhost:3000`n" -ForegroundColor Yellow
 

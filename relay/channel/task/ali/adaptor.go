@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -244,7 +245,9 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		logMap["function"] = "EstimateBilling"
 		logMap["size_v"] = size
 		logMap["resolution_v"] = resolution
-		logMap["audio_v"] = *audio
+		if audio != nil {
+			logMap["audio_v"] = *audio
+		}
 		logMap["duration_v"] = duration
 		logger.BillingDebugMap(c, logMap)
 	}
@@ -301,7 +304,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		return nil, fmt.Errorf("invalid task_id")
 	}
 
-	uri := fmt.Sprintf("%s/api/v1/tasks/%s", baseUrl, taskID)
+	uri := fmt.Sprintf("%s/api/v1/tasks/%s", baseUrl, url.PathEscape(taskID))
 
 	req, err := http.NewRequest(http.MethodGet, uri, nil)
 	if err != nil {
@@ -534,6 +537,7 @@ func buildOldFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliOld
 
 		// 同步 parameter 字段
 		if v, ok := req.Metadata["resolution"].(string); ok {
+			v = strings.ToUpper(strings.TrimSpace(v))
 			if !strings.HasSuffix(v, "P") {
 				v = v + "P"
 			}
@@ -684,6 +688,7 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 
 		// 同步 parameter 字段
 		if v, ok := req.Metadata["resolution"].(string); ok {
+			v = strings.ToUpper(strings.TrimSpace(v))
 			if !strings.HasSuffix(v, "P") {
 				v = v + "P"
 			}
@@ -720,6 +725,9 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 	}
 
 	for _, m := range req.Media {
+		if m.URL == "" {
+			continue
+		}
 		aliReq.Input.Media = append(aliReq.Input.Media, AliMediaItem{
 			Type: m.Type,
 			URL:  m.URL,
@@ -1002,7 +1010,9 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 		}
 		logMap["function"] = "AdjustBillingOnComplete"
 		logMap["resolution_v"] = resolution
-		logMap["audio_v"] = *audio
+		if audio != nil {
+			logMap["audio_v"] = *audio
+		}
 		logMap["actualDuration_v"] = actualDuration
 		logMap["task_quota"] = task.Quota
 		logMap["videoCount"] = videoCount

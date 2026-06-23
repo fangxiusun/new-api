@@ -1,157 +1,197 @@
-#!/usr/bin/env bash
 # build.sh - Linux 本地一键编译脚本
 # 将前端（default + classic）和后端编译为单个可执行文件 new-api
 #
 # 用法:
-#   ./build.sh                  # 完整编译（前端 + 后端）
-#   ./build.sh --skip-frontend  # 仅编译后端（需已存在 web/default/dist 和 web/classic/dist）
-#   ./build.sh --frontend-only  # 仅编译前端
-#   ./build.sh --output-dir /tmp/out  # 指定输出目录
+#   ./build.sh                 # 完整编译（前端 + 后端）
+#   ./build.sh --skip-frontend # 仅编译后端（需已存在 web/default/dist 和 web/classic/dist）
+#   ./build.sh --frontend-only # 仅编译前端
+#   ./build.sh --output-dir /tmp/output # 指定输出目录
 
 set -euo pipefail
 
-# ── 颜色输出辅助 ──
-CYAN='\033[0;36m'
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-step()  { echo -e "\n${CYAN}>> $*${NC}"; }
-ok()    { echo -e "   ${GREEN}OK: $*${NC}"; }
-fail()  { echo -e "   ${RED}FAIL: $*${NC}"; }
-
-# ── 参数解析 ──
 SKIP_FRONTEND=false
 FRONTEND_ONLY=false
 OUTPUT_DIR="."
 
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --skip-frontend)  SKIP_FRONTEND=true;  shift ;;
-        --frontend-only)  FRONTEND_ONLY=true;  shift ;;
-        --output-dir)     OUTPUT_DIR="$2";     shift 2 ;;
-        -h|--help)
-            echo "用法: ./build.sh [--skip-frontend] [--frontend-only] [--output-dir DIR]"
-            exit 0
-            ;;
-        *)
-            echo "未知参数: $1"
-            exit 1
-            ;;
-    esac
+  case "$1" in
+    --skip-frontend|-SkipFrontend)
+      SKIP_FRONTEND=true
+      shift
+      ;;
+    --frontend-only|-FrontendOnly)
+      FRONTEND_ONLY=true
+      shift
+      ;;
+    --output-dir|-OutputDir)
+      OUTPUT_DIR="${2:-}"
+      if [[ -z "$OUTPUT_DIR" ]]; then
+        echo "FAIL: --output-dir 需要指定目录"
+        exit 1
+      fi
+      shift 2
+      ;;
+    -h|--help)
+      echo "用法:"
+      echo "  ./build.sh"
+      echo "  ./build.sh --skip-frontend"
+      echo "  ./build.sh --frontend-only"
+      echo "  ./build.sh --output-dir /tmp/output"
+      exit 0
+      ;;
+    *)
+      echo "FAIL: 未知参数: $1"
+      exit 1
+      ;;
+  esac
 done
 
-# ── 切换到项目根目录（脚本所在目录） ──
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+# ── 颜色输出辅助 ──
+write_step() { echo -e "\033[36m\n>> $1\033[0m"; }
+write_ok()   { echo -e "\033[32m   OK: $1\033[0m"; }
+write_fail() { echo -e "\033[31m   FAIL: $1\033[0m"; }
+
+# ── 项目根目录 ──
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 # ── 读取版本号 ──
 VERSION=""
-if [[ -f "VERSION" ]]; then
-    raw="$(cat VERSION 2>/dev/null || true)"
-    if [[ -n "$raw" ]]; then
-        VERSION="$(echo "$raw" | tr -d '[:space:]')"
-    fi
+
+if [[ -f VERSION ]]; then
+  VERSION="$(tr -d '\r\n' < VERSION | xargs || true)"
 fi
-if [[ -z "$VERSION" ]]; then
-    VERSION="$(git describe --tags --always 2>/dev/null || true)"
+
+if [[ -z "${VERSION// }" ]]; then
+  VERSION="$(git describe --tags --always 2>/dev/null || true)"
 fi
-if [[ -z "$VERSION" ]]; then
-    VERSION="v0.0.0-dev"
+
+if [[ -z "${VERSION// }" ]]; then
+  VERSION="v0.0.0-dev"
 fi
-echo -e "${YELLOW}Version: ${VERSION}${NC}"
+
+echo -e "\033[33mVersion: $VERSION\033[0m"
 
 # ── 前置检查 ──
-step "检查编译工具"
+write_step "检查编译工具"
 
-if ! command -v go &>/dev/null; then
-    fail "未找到 Go，请先安装 Go 1.25+"
-    exit 1
+if ! command -v go >/dev/null 2>&1; then
+  write_fail "未找到 Go，请先安装 Go 1.25+"
+  exit 1
 fi
-ok "Go: $(go version)"
+write_ok "Go: $(go version)"
 
-if ! command -v bun &>/dev/null; then
-    fail "未找到 Bun，请先安装 Bun (https://bun.sh)"
-    exit 1
+if ! command -v bun >/dev/null 2>&1; then
+  write_fail "未找到 Bun，请先安装 Bun (https://bun.sh)"
+  exit 1
 fi
-ok "Bun: v$(bun --version)"
+write_ok "Bun: v$(bun --version)"
 
 # ── 编译前端 ──
 if [[ "$SKIP_FRONTEND" == false ]]; then
+  write_step "删除上一次构建"
 
-    step "安装前端依赖 (bun install)"
-    pushd web >/dev/null
-    if ! bun install --frozen-lockfile; then
-        echo -e "   ${YELLOW}frozen-lockfile 失败，尝试不加锁安装...${NC}"
-        bun install
-    fi
-    ok "前端依赖安装完成"
-    popd >/dev/null
+  if [[ -d web/default/dist ]]; then
+    rm -rf web/default/dist
+    write_ok "已删除 web/default/dist"
+  fi
 
-    # 构建 default 前端
-    step "编译 default 前端"
-    pushd web/default >/dev/null
-    DISABLE_ESLINT_PLUGIN=true \
-    VITE_REACT_APP_VERSION="$VERSION" \
-        bun run build
-    ok "default 前端编译完成 -> web/default/dist"
-    popd >/dev/null
+  if [[ -d web/classic/dist ]]; then
+    rm -rf web/classic/dist
+    write_ok "已删除 web/classic/dist"
+  fi
 
-    # 构建 classic 前端
-    step "编译 classic 前端"
-    pushd web/classic >/dev/null
-    VITE_REACT_APP_VERSION="$VERSION" \
-        bun run build
-    ok "classic 前端编译完成 -> web/classic/dist"
-    popd >/dev/null
+  write_step "安装前端依赖 (bun install)"
+  pushd web >/dev/null
+  if ! bun install --frozen-lockfile; then
+    echo -e "\033[33m   frozen-lockfile 失败，尝试不加锁安装...\033[0m"
+    bun install
+  fi
+  popd >/dev/null
+  write_ok "前端依赖安装完成"
 
+  write_step "编译 default 前端"
+  pushd web/default >/dev/null
+  DISABLE_ESLINT_PLUGIN=true VITE_REACT_APP_VERSION="$VERSION" bun run build
+  popd >/dev/null
+  write_ok "default 前端编译完成 -> web/default/dist"
+
+  write_step "编译 classic 前端"
+  pushd web/classic >/dev/null
+  VITE_REACT_APP_VERSION="$VERSION" bun run build
+  popd >/dev/null
+  write_ok "classic 前端编译完成 -> web/classic/dist"
 else
-    step "跳过前端编译 (--skip-frontend)"
-    if [[ ! -f "web/default/dist/index.html" ]]; then
-        fail "web/default/dist/index.html 不存在，请先编译前端"
-        exit 1
-    fi
-    if [[ ! -f "web/classic/dist/index.html" ]]; then
-        fail "web/classic/dist/index.html 不存在，请先编译前端"
-        exit 1
-    fi
-    ok "前端产物已存在，跳过"
+  write_step "跳过前端编译 (--skip-frontend)"
+
+  if [[ ! -f web/default/dist/index.html ]]; then
+    write_fail "web/default/dist/index.html 不存在，请先编译前端"
+    exit 1
+  fi
+
+  if [[ ! -f web/classic/dist/index.html ]]; then
+    write_fail "web/classic/dist/index.html 不存在，请先编译前端"
+    exit 1
+  fi
+
+  write_ok "前端产物已存在，跳过"
 fi
 
 if [[ "$FRONTEND_ONLY" == true ]]; then
-    echo -e "\n${GREEN}前端编译完成（--frontend-only 模式，跳过后端编译）${NC}"
-    exit 0
+  echo -e "\033[32m\n前端编译完成（--frontend-only 模式，跳过后端编译）\033[0m"
+  exit 0
 fi
 
 # ── 编译后端 ──
-step "编译 Go 后端 (CGO_ENABLED=0)"
+write_step "编译 Go 后端 (CGO_ENABLED=0)"
 
-export CGO_ENABLED=0
-export GOOS=linux
-export GOARCH=amd64
-export GOEXPERIMENT=greenteagc
+WINDOWS_OUTPUT_NAME="new-api.exe"
+LINUX_OUTPUT_NAME="new-api"
 
-LDFLAGS="-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION}'"
-
-OUTPUT_NAME="new-api"
 if [[ "$OUTPUT_DIR" != "." ]]; then
-    mkdir -p "$OUTPUT_DIR"
-    OUTPUT_PATH="${OUTPUT_DIR}/${OUTPUT_NAME}"
+  mkdir -p "$OUTPUT_DIR"
+  WINDOWS_OUTPUT_PATH="$OUTPUT_DIR/$WINDOWS_OUTPUT_NAME"
+  LINUX_OUTPUT_PATH="$OUTPUT_DIR/$LINUX_OUTPUT_NAME"
 else
-    OUTPUT_PATH="$OUTPUT_NAME"
+  WINDOWS_OUTPUT_PATH="$WINDOWS_OUTPUT_NAME"
+  LINUX_OUTPUT_PATH="$LINUX_OUTPUT_NAME"
 fi
 
-go build -ldflags "$LDFLAGS" -o "$OUTPUT_PATH"
-ok "Go 编译完成 -> $OUTPUT_PATH"
+if [[ -f "$WINDOWS_OUTPUT_PATH" ]]; then
+  rm -f "$WINDOWS_OUTPUT_PATH"
+  write_ok "已删除 $WINDOWS_OUTPUT_PATH"
+fi
+
+if [[ -f "$LINUX_OUTPUT_PATH" ]]; then
+  rm -f "$LINUX_OUTPUT_PATH"
+  write_ok "已删除 $LINUX_OUTPUT_PATH"
+fi
+
+LDFLAGS="-s -w -X github.com/QuantumNous/new-api/common.Version=$VERSION"
+
+write_step "编译 Windows amd64"
+CGO_ENABLED=0 GOEXPERIMENT=greenteagc GOOS=windows GOARCH=amd64 \
+  go build -ldflags "$LDFLAGS" -o "$WINDOWS_OUTPUT_PATH"
+write_ok "Windows 版本 Go 编译完成 -> $WINDOWS_OUTPUT_PATH"
+
+write_step "编译 Linux amd64"
+CGO_ENABLED=0 GOEXPERIMENT=greenteagc GOOS=linux GOARCH=amd64 \
+  go build -ldflags "$LDFLAGS" -o "$LINUX_OUTPUT_PATH"
+write_ok "Linux 编译完成 -> $LINUX_OUTPUT_PATH"
 
 # ── 完成 ──
-SIZE=$(du -h "$OUTPUT_PATH" | cut -f1)
-echo -e "\n${GREEN}========================================"
-echo -e " 编译成功!"
-echo -e " 输出文件: $OUTPUT_PATH"
-echo -e " 文件大小: $SIZE"
-echo -e " 版本号:   $VERSION"
-echo -e "========================================${NC}"
-echo -e "\n${YELLOW}运行: ./$OUTPUT_PATH${NC}"
-echo -e "${YELLOW}默认监听: http://localhost:3000${NC}\n"
+if command -v stat >/dev/null 2>&1; then
+  SIZE_BYTES="$(stat -c%s "$LINUX_OUTPUT_PATH")"
+  SIZE_MB="$(awk "BEGIN { printf \"%.1f\", $SIZE_BYTES / 1024 / 1024 }")"
+else
+  SIZE_MB="未知"
+fi
+
+echo -e "\033[32m\n========================================\033[0m"
+echo -e "\033[32m 编译成功!\033[0m"
+echo -e "\033[32m 输出文件: $LINUX_OUTPUT_PATH\033[0m"
+echo -e "\033[32m 文件大小: ${SIZE_MB} MB\033[0m"
+echo -e "\033[32m 版本号:   $VERSION\033[0m"
+echo -e "\033[32m========================================\033[0m"
+echo -e "\033[33m\n运行: ./$LINUX_OUTPUT_NAME\033[0m"
+echo -e "\033[33m默认监听: http://localhost:3000\n\033[0m"
