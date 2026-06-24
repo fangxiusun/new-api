@@ -738,6 +738,10 @@ func buildNewFormatRequest(model string, req relaycommon.TaskSubmitReq) (*AliNew
 		if m.URL == "" {
 			continue
 		}
+		switch strings.ToLower(m.Type) {
+		case "audio_url":
+			aliReq.Input.AudioURL = m.URL
+		}
 		aliReq.Input.Media = append(aliReq.Input.Media, AliMediaItem{
 			Type: m.Type,
 			URL:  m.URL,
