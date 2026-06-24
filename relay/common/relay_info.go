@@ -699,7 +699,7 @@ type TaskSubmitReq struct {
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
-	Media          []Media                `json:"assets,omitempty"`
+	Media          []Media                `json:"media,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
